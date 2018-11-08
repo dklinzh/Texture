@@ -772,7 +772,7 @@ static std::atomic_bool _useMainThreadDelegateCallbacks(true);
             return;
           }
           
-          if ([imageContainer asdk_image] == nil && self->_downloader != nil) {
+          if ([imageContainer asdk_image] == nil && [imageContainer asdk_animatedImageData] == nil && self->_downloader != nil) {
             [self _downloadImageWithCompletion:^(id<ASImageContainerProtocol> imageContainer, NSError *error, id downloadIdentifier, id userInfo) {
               finished(imageContainer, error, downloadIdentifier, ASNetworkImageSourceDownload, userInfo);
             }];
