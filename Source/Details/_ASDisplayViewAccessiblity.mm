@@ -11,10 +11,11 @@
 
 #import <AsyncDisplayKit/_ASDisplayView.h>
 #import <AsyncDisplayKit/ASAvailability.h>
+#import <AsyncDisplayKit/ASCollectionNode.h>
 #import <AsyncDisplayKit/ASDisplayNodeExtras.h>
 #import <AsyncDisplayKit/ASDisplayNode+FrameworkPrivate.h>
-#import <AsyncDisplayKit/ASDisplayNode+Beta.h>
 #import <AsyncDisplayKit/ASDisplayNodeInternal.h>
+#import <AsyncDisplayKit/ASTableNode.h>
 
 #import <queue>
 
@@ -208,7 +209,13 @@ static void CollectAccessibilityElementsForView(UIView *view, NSMutableArray *el
   
   ASDisplayNode *node = view.asyncdisplaykit_node;
 
-  if (node.isAccessibilityContainer) {
+  BOOL anySubNodeIsCollection = (nil != ASDisplayNodeFindFirstNode(node,
+      ^BOOL(ASDisplayNode *nodeToCheck) {
+    return ASDynamicCast(nodeToCheck, ASCollectionNode) != nil ||
+           ASDynamicCast(nodeToCheck, ASTableNode) != nil;
+  }));
+
+  if (node.isAccessibilityContainer && !anySubNodeIsCollection) {
     CollectAccessibilityElementsForContainer(node, view, elements);
     return;
   }
@@ -265,7 +272,8 @@ static void CollectAccessibilityElementsForView(UIView *view, NSMutableArray *el
   if (viewNode == nil) {
     return @[];
   }
-  if (_accessibilityElements == nil) {
+
+  if (_accessibilityElements == nil || ASActivateExperimentalFeature(ASExperimentalDisableAccessibilityCache)) {
     _accessibilityElements = [viewNode accessibilityElements];
   }
   return _accessibilityElements;
@@ -285,6 +293,34 @@ static void CollectAccessibilityElementsForView(UIView *view, NSMutableArray *el
   CollectAccessibilityElementsForView(self.view, accessibilityElements);
   SortAccessibilityElements(accessibilityElements);
   return accessibilityElements;
+}
+
+@end
+
+@implementation _ASDisplayView (UIAccessibilityAction)
+
+- (BOOL)accessibilityActivate {
+  return [self.asyncdisplaykit_node accessibilityActivate];
+}
+
+- (void)accessibilityIncrement {
+  [self.asyncdisplaykit_node accessibilityIncrement];
+}
+
+- (void)accessibilityDecrement {
+  [self.asyncdisplaykit_node accessibilityDecrement];
+}
+
+- (BOOL)accessibilityScroll:(UIAccessibilityScrollDirection)direction {
+  return [self.asyncdisplaykit_node accessibilityScroll:direction];
+}
+
+- (BOOL)accessibilityPerformEscape {
+  return [self.asyncdisplaykit_node accessibilityPerformEscape];
+}
+
+- (BOOL)accessibilityPerformMagicTap {
+  return [self.asyncdisplaykit_node accessibilityPerformMagicTap];
 }
 
 @end

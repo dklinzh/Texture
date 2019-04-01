@@ -17,7 +17,6 @@
 #import <AsyncDisplayKit/ASDisplayNode+FrameworkPrivate.h>
 #import <AsyncDisplayKit/ASDisplayNode+Subclasses.h>
 #import <AsyncDisplayKit/ASDisplayNodeExtras.h>
-#import <AsyncDisplayKit/ASDisplayNode+Beta.h>
 #import <AsyncDisplayKit/ASGraphicsContext.h>
 #import <AsyncDisplayKit/ASLayout.h>
 #import <AsyncDisplayKit/ASTextNode.h>
@@ -203,7 +202,7 @@ typedef void (^ASImageNodeDrawParametersBlock)(ASWeakMapEntry *entry);
     return nil;
   }
   
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   
   ASGraphicsBeginImageContextWithOptions(size, NO, 1);
   [self.placeholderColor setFill];
@@ -217,7 +216,7 @@ typedef void (^ASImageNodeDrawParametersBlock)(ASWeakMapEntry *entry);
 
 - (CGSize)calculateSizeThatFits:(CGSize)constrainedSize
 {
-  let image = ASLockedSelf(_image);
+  const auto image = ASLockedSelf(_image);
 
   if (image == nil) {
     return [super calculateSizeThatFits:constrainedSize];
@@ -230,7 +229,7 @@ typedef void (^ASImageNodeDrawParametersBlock)(ASWeakMapEntry *entry);
 
 - (void)setImage:(UIImage *)image
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   [self _locked_setImage:image];
 }
 
@@ -433,13 +432,17 @@ typedef void (^ASImageNodeDrawParametersBlock)(ASWeakMapEntry *entry);
 }
 
 static ASWeakMap<ASImageNodeContentsKey *, UIImage *> *cache = nil;
-// Allocate cacheLock on the heap to prevent destruction at app exit (https://github.com/TextureGroup/Texture/issues/136)
-static auto *cacheLock = new ASDN::Mutex;
 
 + (ASWeakMapEntry *)contentsForkey:(ASImageNodeContentsKey *)key drawParameters:(id)drawParameters isCancelled:(asdisplaynode_iscancelled_block_t)isCancelled
 {
+  static dispatch_once_t onceToken;
+  static AS::Mutex *cacheLock = nil;
+  dispatch_once(&onceToken, ^{
+    cacheLock = new AS::Mutex();
+  });
+  
   {
-    ASDN::MutexLocker l(*cacheLock);
+    AS::MutexLocker l(*cacheLock);
     if (!cache) {
       cache = [[ASWeakMap alloc] init];
     }
@@ -456,7 +459,7 @@ static auto *cacheLock = new ASDN::Mutex;
   }
 
   {
-    ASDN::MutexLocker l(*cacheLock);
+    AS::MutexLocker l(*cacheLock);
     return [cache setObject:contents forKey:key];
   }
 }
@@ -470,9 +473,17 @@ static auto *cacheLock = new ASDN::Mutex;
     return nil;
   }
 
+  // If the image is opaque, and the draw rect contains the bounds rect, we can use an opaque context.
+  UIImage *image = key.image;
+  const CGRect imageDrawRect = key.imageDrawRect;
+  const CGRect contextBounds = { CGPointZero, key.backingSize };
+  const BOOL imageIsOpaque = ASImageAlphaInfoIsOpaque(CGImageGetAlphaInfo(image.CGImage));
+  const BOOL imageFillsContext = CGRectContainsRect(imageDrawRect, contextBounds);
+  const BOOL contextIsOpaque = (imageIsOpaque && imageFillsContext) || key.isOpaque;
+
   // Use contentsScale of 1.0 and do the contentsScale handling in boundsSizeInPixels so ASCroppedImageBackingSizeAndDrawRectInBounds
   // will do its rounding on pixel instead of point boundaries
-  ASGraphicsBeginImageContextWithOptions(key.backingSize, key.isOpaque, 1.0);
+  ASGraphicsBeginImageContextWithOptions(contextBounds.size, contextIsOpaque, 1.0);
   
   BOOL contextIsClean = YES;
   
@@ -500,13 +511,12 @@ static auto *cacheLock = new ASDN::Mutex;
   // upon removal of the object from the set when the operation completes.
   // Another option is to have ASDisplayNode+AsyncDisplay coordinate these cases, and share the decoded buffer.
   // Details tracked in https://github.com/facebook/AsyncDisplayKit/issues/1068
-  
-  UIImage *image = key.image;
-  BOOL canUseCopy = (contextIsClean || ASImageAlphaInfoIsOpaque(CGImageGetAlphaInfo(image.CGImage)));
+
+  BOOL canUseCopy = (contextIsClean || imageIsOpaque);
   CGBlendMode blendMode = canUseCopy ? kCGBlendModeCopy : kCGBlendModeNormal;
   
   @synchronized(image) {
-    [image drawInRect:key.imageDrawRect blendMode:blendMode alpha:1];
+    [image drawInRect:imageDrawRect blendMode:blendMode alpha:1];
   }
   
   if (context && key.didDisplayNodeContentWithRenderingContext) {
@@ -578,7 +588,7 @@ static auto *cacheLock = new ASDN::Mutex;
 
   // Stash the block and call-site queue. We'll invoke it in -displayDidFinish.
   {
-    ASDN::MutexLocker l(__instanceLock__);
+    AS::MutexLocker l(__instanceLock__);
     if (_displayCompletionBlock != displayCompletionBlock) {
       _displayCompletionBlock = displayCompletionBlock;
     }
@@ -593,7 +603,7 @@ static auto *cacheLock = new ASDN::Mutex;
 {
   [super clearContents];
   
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   _weakCacheEntry = nil;  // release contents from the cache.
 }
 
@@ -601,7 +611,7 @@ static auto *cacheLock = new ASDN::Mutex;
 
 - (BOOL)isCropEnabled
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   return _cropEnabled;
 }
 
@@ -637,14 +647,14 @@ static auto *cacheLock = new ASDN::Mutex;
 
 - (CGRect)cropRect
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   return _cropRect;
 }
 
 - (void)setCropRect:(CGRect)cropRect
 {
   {
-    ASDN::MutexLocker l(__instanceLock__);
+    AS::MutexLocker l(__instanceLock__);
     if (CGRectEqualToRect(_cropRect, cropRect)) {
       return;
     }
@@ -667,37 +677,37 @@ static auto *cacheLock = new ASDN::Mutex;
 
 - (BOOL)forceUpscaling
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   return _forceUpscaling;
 }
 
 - (void)setForceUpscaling:(BOOL)forceUpscaling
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   _forceUpscaling = forceUpscaling;
 }
 
 - (CGSize)forcedSize
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   return _forcedSize;
 }
 
 - (void)setForcedSize:(CGSize)forcedSize
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   _forcedSize = forcedSize;
 }
 
 - (asimagenode_modification_block_t)imageModificationBlock
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   return _imageModificationBlock;
 }
 
 - (void)setImageModificationBlock:(asimagenode_modification_block_t)imageModificationBlock
 {
-  ASDN::MutexLocker l(__instanceLock__);
+  AS::MutexLocker l(__instanceLock__);
   _imageModificationBlock = imageModificationBlock;
 }
 
