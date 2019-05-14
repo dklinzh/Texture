@@ -78,7 +78,7 @@ NS_ASSUME_NONNULL_BEGIN
  * directly set images to the image property will be cleared out and replaced by the placeholder (<defaultImage>) image
  * while loading and the final image after the new image data was downloaded and processed.
  */
-@property (nullable, copy) NSURL *URL;
+@property (nullable, copy) NSURL *URL ASDISPLAYNODE_DEPRECATED_MSG("<XRJExtensionSwift> Use func urlFixed(_:) instead for image processing.");
 
 /**
   * An array of URLs of increasing cost to download.
@@ -102,7 +102,7 @@ NS_ASSUME_NONNULL_BEGIN
  * directly set images to the image property will be cleared out and replaced by the placeholder (<defaultImage>) image
  * while loading and the final image after the new image data was downloaded and processed.
  */
-- (void)setURL:(nullable NSURL *)URL resetToDefault:(BOOL)reset;
+- (void)setURL:(nullable NSURL *)URL resetToDefault:(BOOL)reset ASDISPLAYNODE_DEPRECATED_MSG("<XRJExtensionSwift> Use func urlFixed(_:resetToDefault:) instead for image processing.");
 
 /**
  * If <URL> is a local file, set this property to YES to take advantage of UIKit's image caching.  Defaults to YES.
