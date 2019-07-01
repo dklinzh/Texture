@@ -170,24 +170,7 @@ static ASDisplayNodeMethodOverrides GetASDisplayNodeMethodOverrides(Class c)
   if (ASDisplayNodeSubclassOverridesSelector(c, @selector(touchesEnded:withEvent:))) {
     overrides |= ASDisplayNodeMethodOverrideTouchesEnded;
   }
-  
-  // Responder chain
-  if (ASDisplayNodeSubclassOverridesSelector(c, @selector(canBecomeFirstResponder))) {
-    overrides |= ASDisplayNodeMethodOverrideCanBecomeFirstResponder;
-  }
-  if (ASDisplayNodeSubclassOverridesSelector(c, @selector(becomeFirstResponder))) {
-    overrides |= ASDisplayNodeMethodOverrideBecomeFirstResponder;
-  }
-  if (ASDisplayNodeSubclassOverridesSelector(c, @selector(canResignFirstResponder))) {
-    overrides |= ASDisplayNodeMethodOverrideCanResignFirstResponder;
-  }
-  if (ASDisplayNodeSubclassOverridesSelector(c, @selector(resignFirstResponder))) {
-    overrides |= ASDisplayNodeMethodOverrideResignFirstResponder;
-  }
-  if (ASDisplayNodeSubclassOverridesSelector(c, @selector(isFirstResponder))) {
-    overrides |= ASDisplayNodeMethodOverrideIsFirstResponder;
-  }
-  
+
   // Layout related methods
   if (ASDisplayNodeSubclassOverridesSelector(c, @selector(layoutSpecThatFits:))) {
     overrides |= ASDisplayNodeMethodOverrideLayoutSpecThatFits;
@@ -905,26 +888,6 @@ ASSynthesizeLockingMethodsWithMutex(__instanceLock__);
   }
 }
 
-#pragma mark - UIResponder
-
-#define HANDLE_NODE_RESPONDER_METHOD(__sel) \
-  /* All responder methods should be called on the main thread */ \
-  ASDisplayNodeAssertMainThread(); \
-  if (checkFlag(Synchronous)) { \
-    /* If the view is not a _ASDisplayView subclass (Synchronous) just call through to the view as we
-     expect it's a non _ASDisplayView subclass that will respond */ \
-    return [_view __sel]; \
-  } else { \
-    if (ASSubclassOverridesSelector([_ASDisplayView class], _viewClass, @selector(__sel))) { \
-    /* If the subclass overwrites canBecomeFirstResponder just call through
-       to it as we expect it will handle it */ \
-      return [_view __sel]; \
-    } else { \
-      /* Call through to _ASDisplayView's superclass to get it handled */ \
-      return [(_ASDisplayView *)_view __##__sel]; \
-    } \
-  } \
-
 - (void)checkResponderCompatibility
 {
 #if ASDISPLAYNODE_ASSERTIONS_ENABLED
@@ -940,60 +903,6 @@ ASSynthesizeLockingMethodsWithMutex(__instanceLock__);
     ASDisplayNodeAssert(!ASDisplayNodeSubclassOverridesSelector(self.class, @selector(isFirstResponder)), ([NSString stringWithFormat:message, @"isFirstResponder"]));
   }
 #endif
-}
-
-- (BOOL)__canBecomeFirstResponder
-{
-  if (_view == nil) {
-    // By default we return NO if not view is created yet
-    return NO;
-  }
-  
-  HANDLE_NODE_RESPONDER_METHOD(canBecomeFirstResponder);
-}
-
-- (BOOL)__becomeFirstResponder
-{
-  // Note: This implicitly loads the view if it hasn't been loaded yet.
-  [self view];
-
-  if (![self canBecomeFirstResponder]) {
-    return NO;
-  }
-
-  HANDLE_NODE_RESPONDER_METHOD(becomeFirstResponder);
-}
-
-- (BOOL)__canResignFirstResponder
-{
-  if (_view == nil) {
-    // By default we return YES if no view is created yet
-    return YES;
-  }
-  
-  HANDLE_NODE_RESPONDER_METHOD(canResignFirstResponder);
-}
-
-- (BOOL)__resignFirstResponder
-{
-  // Note: This implicitly loads the view if it hasn't been loaded yet.
-  [self view];
-
-  if (![self canResignFirstResponder]) {
-    return NO;
-  }
-  
-  HANDLE_NODE_RESPONDER_METHOD(resignFirstResponder);
-}
-
-- (BOOL)__isFirstResponder
-{
-  if (_view == nil) {
-    // If no view is created yet we can just return NO as it's unlikely it's the first responder
-    return NO;
-  }
-  
-  HANDLE_NODE_RESPONDER_METHOD(isFirstResponder);
 }
 
 #pragma mark <ASDebugNameProvider>
@@ -1108,12 +1017,12 @@ ASSynthesizeLockingMethodsWithMutex(__instanceLock__);
   as_activity_scope_verbose(as_activity_create("Calculate node layout", AS_ACTIVITY_CURRENT, OS_ACTIVITY_FLAG_DEFAULT));
   as_log_verbose(ASLayoutLog(), "Calculating layout for %@ sizeRange %@", self, NSStringFromASSizeRange(constrainedSize));
 
-#if AS_KDEBUG_ENABLE
+#if AS_SIGNPOST_ENABLE
   // We only want one calculateLayout signpost interval per thread.
   // Currently there is no fallback for profiling i386, since it's not useful.
   static _Thread_local NSInteger tls_callDepth;
   if (tls_callDepth++ == 0) {
-    ASSignpostStart(ASSignpostCalculateLayout);
+    ASSignpostStart(CalculateLayout, self, "%@", ASObjectDescriptionMakeTiny(self));
   }
 #endif
 
@@ -1122,9 +1031,9 @@ ASSynthesizeLockingMethodsWithMutex(__instanceLock__);
   ASLayout *result = [self calculateLayoutThatFits:resolvedRange];
   as_log_verbose(ASLayoutLog(), "Calculated layout %@", result);
 
-#if AS_KDEBUG_ENABLE
+#if AS_SIGNPOST_ENABLE
   if (--tls_callDepth == 0) {
-    ASSignpostEnd(ASSignpostCalculateLayout);
+    ASSignpostEnd(CalculateLayout, self, "");
   }
 #endif
   
@@ -1385,6 +1294,8 @@ NSString * const ASRenderingEngineDidDisplayNodesScheduledBeforeTimestamp = @"AS
   [_pendingDisplayNodes removeObject:node];
 
   if (_pendingDisplayNodes.isEmpty) {
+    // Reclaim object memory.
+    _pendingDisplayNodes = nil;
     
     [self hierarchyDisplayDidFinish];
     [self enumerateInterfaceStateDelegates:^(id<ASInterfaceStateDelegate> delegate) {
